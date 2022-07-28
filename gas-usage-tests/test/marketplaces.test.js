@@ -26,11 +26,24 @@ const WyvernProxyRegistry = artifacts.require("WyvernProxyRegistry.sol");
 
 //TOKENS
 const TestERC721 = artifacts.require("TestERC721.sol");
+const TestERC1155 = artifacts.require("TestERC1155.sol");
 const TestERC20 = artifacts.require("TestERC20.sol");
 
 //SEA PORT
 const ConduitController = artifacts.require("ConduitController.sol");
 const Seaport = artifacts.require("Seaport.sol");
+
+//LOOKS RARE
+const LooksRareTestHelper = artifacts.require("LooksRareTestHelper.sol");
+const LooksRareExchange = artifacts.require("LooksRareExchange.sol");
+const LR_currencyManager = artifacts.require("CurrencyManager.sol");
+const LR_executionManager = artifacts.require("ExecutionManager.sol");
+const LR_royaltyFeeManager =  artifacts.require("RoyaltyFeeManager.sol");
+const WETH = artifacts.require("WETH9.sol");
+const RoyaltyFeeRegistry = artifacts.require("RoyaltyFeeRegistry.sol");
+const TransferSelectorNFT = artifacts.require("TransferSelectorNFT.sol");
+const TransferManagerERC721 = artifacts.require("TransferManagerERC721.sol");
+const TransferManagerERC1155 = artifacts.require("TransferManagerERC1155.sol");
 
 // UTILS
 const { Order, Asset, sign } = require("../../scripts/order.js");
@@ -50,6 +63,8 @@ contract("Test gas usage for marketplaces", accounts => {
 
   const buyer = accounts[4];
   const protocol = accounts[9];
+  const LR_protocolFeeRecipient = accounts[3];
+//  const LR_protocolFeeRecipient = zeroAddress;
 
   const protocolFeeBP = 300;
 
@@ -65,6 +80,131 @@ contract("Test gas usage for marketplaces", accounts => {
   before(async () => {
     testHelper = await RaribleTestHelper.new()
   });
+
+  it("LooksRare ETH<->ERC721", async () => {
+    const lr_currencyManager = await LR_currencyManager.new();
+    const lr_executionManager = await LR_executionManager.new();
+    const LR_royaltyFeeRegistry = await RoyaltyFeeRegistry.new(9000);
+    const lr_royaltyFeeManager = await LR_royaltyFeeManager.new(LR_royaltyFeeRegistry.address);
+    const weth = await WETH.new();
+    const looksRareExchange = await LooksRareExchange.new(lr_currencyManager.address, lr_executionManager.address, lr_royaltyFeeManager.address, weth.address, LR_protocolFeeRecipient);
+    const transferManagerERC721 = await TransferManagerERC721.new(looksRareExchange.address);
+    const transferManagerERC1155 = await TransferManagerERC1155.new(looksRareExchange.address);
+    const transferSelectorNFT = await TransferSelectorNFT.new(transferManagerERC721.address, transferManagerERC1155.address);// transfer721, transfer1155
+
+    await looksRareExchange.updateTransferSelectorNFT(transferSelectorNFT.address);
+    await lr_currencyManager.addCurrency(weth.address);
+//    const lr_strategy = await LooksRareTestHelper.new(1000);
+    const lr_strategy = await LooksRareTestHelper.new(0);
+    await lr_executionManager.addStrategy(lr_strategy.address);
+
+    const token = await TestERC721.new();
+    await token.mint(seller, tokenId)
+    await token.setApprovalForAll(transferManagerERC721.address, true, {from: seller});
+    await transferSelectorNFT.addCollectionTransferManager(token.address, transferManagerERC721.address);
+
+    const takerBid = {
+      isOrderAsk: false,
+      taker: buyer,
+      price: 10000,
+      tokenId: '0x3039',
+      minPercentageToAsk: 8000,
+      params: '0x'
+    }
+    const makerAsk = {
+      isOrderAsk: true,
+      signer: seller,
+      collection: token.address,
+      price: 10000,
+      tokenId: '0x3039',
+      amount: 1,
+      strategy: lr_strategy.address,
+      currency: weth.address,
+      nonce: 16,
+      startTime: 0,
+      endTime: '0xff00000000000000000000000000',
+      minPercentageToAsk: 8000,
+      params: '0x',
+      v: 28,
+      r: '0x66719130e732d87a2fd63e4b5360f627d013b93a9c6768ab3fa305c178c84388',
+      s: '0x6f56a6089adf5af7cc45885d4294ebfd7ea9326a42aa977fc0732677e007cdd3'
+    }
+    console.log("LooksRare: ETH <=> ERC721")
+
+    assert.equal(await token.balanceOf(buyer), 0);
+    await verifyBalanceChange(buyer, 10000, async () =>
+      verifyBalanceChange(LR_protocolFeeRecipient, 0, async () => //all ETH deposited to WETH, fprotocolFeeRecipient get WETH
+        verifyBalanceChange(seller, 0, async () => //all ETH deposited to WETH, seller get WETH
+          looksRareExchange.matchAskWithTakerBidUsingETHAndWETH(takerBid, makerAsk, {from: buyer, value: 10000, gasPrice: 0 })
+        )
+      )
+    )
+    console.log();
+    assert.equal(await token.balanceOf(buyer), 1);
+    assert.equal(await weth.balanceOf(seller), 10000);
+  })
+  it("LooksRare ETH<->ERC1155", async () => {
+    const lr_currencyManager = await LR_currencyManager.new();
+    const lr_executionManager = await LR_executionManager.new();
+    const LR_royaltyFeeRegistry = await RoyaltyFeeRegistry.new(9000);
+    const lr_royaltyFeeManager = await LR_royaltyFeeManager.new(LR_royaltyFeeRegistry.address);
+    const weth = await WETH.new();
+    const looksRareExchange = await LooksRareExchange.new(lr_currencyManager.address, lr_executionManager.address, lr_royaltyFeeManager.address, weth.address, LR_protocolFeeRecipient);
+    const transferManagerERC721 = await TransferManagerERC721.new(looksRareExchange.address);
+    const transferManagerERC1155 = await TransferManagerERC1155.new(looksRareExchange.address);
+    const transferSelectorNFT = await TransferSelectorNFT.new(transferManagerERC721.address, transferManagerERC1155.address);// transfer721, transfer1155
+
+    await looksRareExchange.updateTransferSelectorNFT(transferSelectorNFT.address);
+    await lr_currencyManager.addCurrency(weth.address);
+//    const lr_strategy = await LooksRareTestHelper.new(1000);
+    const lr_strategy = await LooksRareTestHelper.new(0);
+    await lr_executionManager.addStrategy(lr_strategy.address);
+
+    const token = await TestERC1155.new();
+    await token.mint(seller, tokenId, 10)
+    await token.setApprovalForAll(transferManagerERC1155.address, true, {from: seller});
+    await transferSelectorNFT.addCollectionTransferManager(token.address, transferManagerERC1155.address);
+
+    const takerBid = {
+      isOrderAsk: false,
+      taker: buyer,
+      price: 10000,
+      tokenId: '0x3039',
+      minPercentageToAsk: 8000,
+      params: '0x'
+    }
+    const makerAsk = {
+      isOrderAsk: true,
+      signer: seller,
+      collection: token.address,
+      price: 10000,
+      tokenId: '0x3039',
+      amount: 10,
+      strategy: lr_strategy.address,
+      currency: weth.address,
+      nonce: 16,
+      startTime: 0,
+      endTime: '0xff00000000000000000000000000',
+      minPercentageToAsk: 8000,
+      params: '0x',
+      v: 28,
+      r: '0x66719130e732d87a2fd63e4b5360f627d013b93a9c6768ab3fa305c178c84388',
+      s: '0x6f56a6089adf5af7cc45885d4294ebfd7ea9326a42aa977fc0732677e007cdd3'
+    }
+    console.log("LooksRare: ETH <=> ERC1155")
+
+    assert.equal(await token.balanceOf(buyer, tokenId), 0);
+    await verifyBalanceChange(buyer, 10000, async () =>
+      verifyBalanceChange(LR_protocolFeeRecipient, 0, async () => //all ETH deposited to WETH, fprotocolFeeRecipient get WETH
+        verifyBalanceChange(seller, 0, async () => //all ETH deposited to WETH, seller get WETH
+          looksRareExchange.matchAskWithTakerBidUsingETHAndWETH(takerBid, makerAsk, {from: buyer, value: 10000, gasPrice: 0 })
+        )
+      )
+    )
+    console.log();
+    assert.equal(await token.balanceOf(buyer, tokenId), 10);
+    assert.equal(await weth.balanceOf(seller), 10000);
+  })
 
   it("zora ETH asks", async () => {
     const ZPFS = await ZoraProtocolFeeSettings.new();
@@ -90,7 +230,7 @@ contract("Test gas usage for marketplaces", accounts => {
     await ZMM.setApprovalForModule(asks.address, true, {from: seller})
     await ZMM.setApprovalForModule(asks.address, true, {from: buyer})
     await ZPFS.setFeeParams(asks.address, protocol, protocolFeeBP)
-    
+
     console.log("ASKS ETH:")
     //TEST CASE 1: ask ETH <=> ERC721
     //minting token
@@ -120,7 +260,7 @@ contract("Test gas usage for marketplaces", accounts => {
     const fillAsk1 = await asks.fillAsk(token.address, tokenId1, zeroAddress, 1000, zeroAddress, {from: buyer, value: 1000})
     console.log("ZORA: buy ETH <=> ERC721 (second token in collection)",fillAsk1.receipt.gasUsed)
   })
-  
+
   it("zora ETH offers", async () => {
     const ZPFS = await ZoraProtocolFeeSettings.new();
     const ZMM = await ZoraModuleManager.new(registrar, ZPFS.address);
@@ -138,7 +278,7 @@ contract("Test gas usage for marketplaces", accounts => {
 
     const token = await TestERC721.new();
     const erc20 = await TestERC20.new();
-    
+
     const offers = await OffersV1.new(erc20TransferHelper.address, erc721TransferHelper.address, royaltyEngine.address, ZPFS.address, erc20.address);
     await ZMM.registerModule(offers.address)
     await ZMM.setApprovalForModule(offers.address, true, {from: seller})
@@ -223,12 +363,12 @@ contract("Test gas usage for marketplaces", accounts => {
     assert.equal(await erc20.balanceOf(buyer), 0, "erc20 buyer");
     assert.equal(await erc20.balanceOf(protocol), 30, "protocol")
     assert.equal(await erc20.balanceOf(seller), 970, "seller")
-    
+
     // TEST CASE 2: ask ERC20 <=> ERC721
     // minting second token
     await token.mint(seller, tokenId1)
     await token.setApprovalForAll(erc721TransferHelper.address, true, {from: seller})
-    
+
     // getting ERC20
     await erc20.mint(buyer, 1000)
     await erc20.approve(erc20TransferHelper.address, 1000, {from: buyer})
@@ -334,10 +474,10 @@ contract("Test gas usage for marketplaces", accounts => {
 		let encDataRight = await encDataV3_SELL([ 0, await LibPartToUint(), 0, 1000, MARKET_MARKER_SELL ]);
 
 		const right = Order(seller, Asset(ERC721, enc( token.address, tokenId), 1), zeroAddress, Asset(ETH, "0x", price), 1, 0, 0, ORDER_DATA_V3_SELL, encDataRight);
-    
+
     const signature1 = await getSignature(exchangeV2, right, seller);
     const directBuyParams1  = {seller: seller, token: token.address, assetType: ERC721, tokenId: tokenId, tokenAmount: 1, price: price, salt: 1, signature: signature1};
-    
+
     const matchTx1 = await exchangeV2.directPurchase(directBuyParams1, encDataRight, encDataLeft, { from: buyer, value: price });
     console.log("RARIBLE: match ETH <=> ERC721", matchTx1.receipt.gasUsed)
 
@@ -348,10 +488,10 @@ contract("Test gas usage for marketplaces", accounts => {
     await token.setApprovalForAll(transferProxy.address, true, {from: seller})
 
 		const right1 = Order(seller, Asset(ERC721, enc( token.address, tokenid1), 1), zeroAddress, Asset(ETH, "0x", price), 2, 0, 0, ORDER_DATA_V3_SELL, encDataRight);
-    
+
     const signature2 = await getSignature(exchangeV2, right1, seller);
     const directBuyParams2  = {seller: seller, token: token.address, assetType: ERC721, tokenId: tokenid1, tokenAmount: 1, price: price, salt: 2, signature: signature2};
-    
+
     const matchTx2 = await exchangeV2.directPurchase(directBuyParams2, encDataRight, encDataLeft, { from: buyer, value: price });
     console.log("RARIBLE: match ETH <=> ERC721 (second token of collection)", matchTx2.receipt.gasUsed)
 
@@ -388,9 +528,9 @@ contract("Test gas usage for marketplaces", accounts => {
 		let encDataRight = await encDataV3_SELL([ 0, await LibPartToUint(), 0, 1000, MARKET_MARKER_SELL]);
 
     const left = Order(buyer, Asset(ERC20, enc(erc20.address), price), zeroAddress, Asset(ERC721, enc( token.address, tokenId), 1), 1, 0, 0, ORDER_DATA_V3_BUY, encDataLeft);
-    
+
     const signature = await getSignature(exchangeV2, left, buyer);
-  
+
     const directAcceptParams  = {buyer: buyer, tokenPayment: erc20.address, tokenNft: token.address , assetType: ERC721, tokenId: tokenId, tokenAmount: 1, price: price, salt: 1, signature: signature};
 
     const matchTx1 = await exchangeV2.directAcceptBid(directAcceptParams, encDataLeft, encDataRight, { from: seller });
@@ -413,9 +553,9 @@ contract("Test gas usage for marketplaces", accounts => {
     assert.equal(await erc20.balanceOf(buyer), price, "erc20 deposit")
 
     const left1 = Order(buyer, Asset(ERC20, enc(erc20.address), price), zeroAddress, Asset(ERC721, enc( token.address, tokenid1), 1), 2, 0, 0, ORDER_DATA_V3_BUY, encDataLeft);
-    
+
     const signature1 = await getSignature(exchangeV2, left1, buyer);
-  
+
     const directAcceptParams1  = {buyer: buyer, tokenPayment: erc20.address, tokenNft: token.address , assetType: ERC721, tokenId: tokenid1, tokenAmount: 1, price: price, salt: 2, signature: signature1};
 
     const matchTx2 = await exchangeV2.directAcceptBid(directAcceptParams1, encDataLeft, encDataRight, { from: seller });
@@ -456,7 +596,7 @@ contract("Test gas usage for marketplaces", accounts => {
 
     const left = Order(buyer, Asset(ETH, "0x", 1000), zeroAddress, Asset(ERC721, enc( token.address, tokenId), 1), 0, 0, 0, ORDER_DATA_V2, encDataLeft);
 		const right = Order(seller, Asset(ERC721, enc( token.address, tokenId), 1), zeroAddress, Asset(ETH, "0x", 1000), 1, 0, 0, ORDER_DATA_V2, encDataRight);
-    
+
     console.log("OLD RARIBLE: match ETH <=> ERC721")
     await verifyBalanceChange(buyer, 1030, async () =>
       verifyBalanceChange(protocol, -60, async () =>
@@ -475,7 +615,7 @@ contract("Test gas usage for marketplaces", accounts => {
 
     const left1 = Order(buyer, Asset(ETH, "0x", 1000), zeroAddress, Asset(ERC721, enc( token.address, tokenid1), 1), 0, 0, 0, ORDER_DATA_V2, encDataLeft);
 		const right1 = Order(seller, Asset(ERC721, enc( token.address, tokenid1), 1), zeroAddress, Asset(ETH, "0x", 1000), 2, 0, 0, ORDER_DATA_V2, encDataRight);
-    
+
     console.log("OLD RARIBLE: match ETH <=> ERC721 (second token of collection)")
     await verifyBalanceChange(buyer, 1030, async () =>
       verifyBalanceChange(protocol, -60, async () =>
@@ -520,7 +660,7 @@ contract("Test gas usage for marketplaces", accounts => {
 
     const left = Order(buyer, Asset(ERC20, enc(erc20.address), 1000), zeroAddress, Asset(ERC721, enc( token.address, tokenId), 1), 0, 0, 0, ORDER_DATA_V2, encDataLeft);
 		const right = Order(seller, Asset(ERC721, enc( token.address, tokenId), 1), zeroAddress, Asset(ERC20, enc(erc20.address), 1000), 1, 0, 0, ORDER_DATA_V2, encDataRight);
-    
+
     const matchTx1 = await exchangeV2.matchOrders(left, "0x", right, await getSignature(exchangeV2, right, seller), { from: buyer});
     console.log("OLD RARIBLE: match ERC20 <=> ERC721", matchTx1.receipt.gasUsed)
 
@@ -536,7 +676,7 @@ contract("Test gas usage for marketplaces", accounts => {
 
     const left1 = Order(buyer, Asset(ERC20, enc(erc20.address), 1000), zeroAddress, Asset(ERC721, enc( token.address, tokenid1), 1), 0, 0, 0, ORDER_DATA_V2, encDataLeft);
 		const right1 = Order(seller, Asset(ERC721, enc( token.address, tokenid1), 1), zeroAddress, Asset(ERC20, enc(erc20.address), 1000), 2, 0, 0, ORDER_DATA_V2, encDataRight);
-    
+
     const matchTx2 = await exchangeV2.matchOrders(left1, "0x", right1, await getSignature(exchangeV2, right1, seller), { from: buyer});
     console.log("OLD RARIBLE: match ERC20 <=> ERC721 (second token of collection)", matchTx2.receipt.gasUsed)
 
@@ -555,16 +695,16 @@ contract("Test gas usage for marketplaces", accounts => {
 
     const wyvernProxyRegistry = await WyvernProxyRegistry.new();
     await wyvernProxyRegistry.registerProxy( {from: seller});
-    
+
     const tokenTransferProxy = await WyvernTokenTransferProxy.new(wyvernProxyRegistry.address);
-     
+
     const openSea = await WyvernExchangeWithBulkCancellations.new(wyvernProxyRegistry.address, tokenTransferProxy.address, erc20.address, protocol, {gas: 6000000})
     await wyvernProxyRegistry.endGrantAuthentication(openSea.address)
 
     const merkleValidator = await MerkleValidator.new()
 
     const tokenId = "75613545885676541905391001206491807325218654950449380199280837289294958690904";
-     
+
     await token.mint(seller, tokenId)
     await token.setApprovalForAll(await wyvernProxyRegistry.proxies(seller), true, {from: seller})
 
@@ -590,16 +730,16 @@ contract("Test gas usage for marketplaces", accounts => {
 
     const wyvernProxyRegistry = await WyvernProxyRegistry.new();
     await wyvernProxyRegistry.registerProxy( {from: seller});
-    
+
     const tokenTransferProxy = await WyvernTokenTransferProxy.new(wyvernProxyRegistry.address);
-     
+
     const openSea = await WyvernExchangeWithBulkCancellations.new(wyvernProxyRegistry.address, tokenTransferProxy.address, erc20.address, protocol, {gas: 6000000})
     await wyvernProxyRegistry.endGrantAuthentication(openSea.address)
 
     const merkleValidator = await MerkleValidator.new()
 
     const tokenId = "75613545885676541905391001206491807325218654950449380199280837289294958690904";
-     
+
     await token.mint(seller, tokenId)
     await token.setApprovalForAll(await wyvernProxyRegistry.proxies(seller), true, {from: seller})
 
@@ -607,7 +747,7 @@ contract("Test gas usage for marketplaces", accounts => {
 
     await erc20.mint(buyer, 1000)
     await erc20.approve(tokenTransferProxy.address, 1000, {from: buyer})
-    
+
     const matchData = (await getOpenSeaMatchDataMerkleValidator(
       openSea.address,
       buyer,
@@ -622,12 +762,12 @@ contract("Test gas usage for marketplaces", accounts => {
     const txMatch = await openSea.atomicMatch_(...matchData, {from:buyer, gas: 500000})
 
     console.log("OPENSEA: ERC20 <=> ERC721", txMatch.receipt.gasUsed)
-    
+
     assert.equal(await token.ownerOf(tokenId), buyer, "buyer has token1");
     assert.equal(await erc20.balanceOf(buyer), 0, "erc20 buyer");
     assert.equal(await erc20.balanceOf(protocol), 100, "protocol")
     assert.equal(await erc20.balanceOf(seller), 900, "seller")
-    
+
     const orderToCancel = await getOpenSeaOrder(
       openSea.address,
       buyer,
@@ -649,7 +789,7 @@ contract("Test gas usage for marketplaces", accounts => {
   it("seaport ETH", async () => {
     const conduitController = await ConduitController.new();
     const seaport = await Seaport.new(conduitController.address)
-  
+
     const token = await TestERC721.new();
     await token.mint(seller, tokenId)
     await token.setApprovalForAll(seaport.address, true, {from: seller})
@@ -694,7 +834,7 @@ contract("Test gas usage for marketplaces", accounts => {
   it("seaport ERC-20", async () => {
     const conduitController = await ConduitController.new();
     const seaport = await Seaport.new(conduitController.address)
-  
+
     const token = await TestERC721.new();
     await token.mint(seller, tokenId)
     await token.setApprovalForAll(seaport.address, true, {from: seller})
@@ -728,7 +868,7 @@ contract("Test gas usage for marketplaces", accounts => {
         }
       ]
     }
-  
+
     const tx = await seaport.fulfillBasicOrder(basicOrder, {from: buyer})
     console.log("SEAPORT: ERC20 <=> ERC721", tx.receipt.gasUsed)
 
