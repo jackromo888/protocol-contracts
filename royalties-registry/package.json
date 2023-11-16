@@ -9,8 +9,8 @@
     "test": "truffle test"
   },
   "dependencies": {
-    "@openzeppelin/contracts": "3.4.0",
-    "@openzeppelin/contracts-upgradeable": "3.4.0",
+    "@openzeppelin/contracts": "4.4.1",
+    "@openzeppelin/contracts-upgradeable": "4.4.1",
     "@rarible/exchange-v2": "^0.4.0",
     "@rarible/royalties": "^0.7.4",
     "@rarible/exchange-interfaces": "^0.4.0",
