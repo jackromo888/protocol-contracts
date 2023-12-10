@@ -22,7 +22,7 @@
     "url": "https://github.com/rariblecom/protocol-contracts/issues"
   },
   "dependencies": {
-    "@openzeppelin/contracts-upgradeable": "3.4.0",
+    "@openzeppelin/contracts-upgradeable": "4.9.5",
     "@rarible/lib-asset": "^0.1.2",
     "@rarible/lib-part": "^0.1.2"
   },
